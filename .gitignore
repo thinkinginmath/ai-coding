@@ -1,0 +1,30 @@
+
+---
+
+## 3. `.gitignore`
+
+```gitignore
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+env/
+venv/
+
+# VSCode / IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# Logs / tmp
+*.log~
+*.tmp
+
+# (重要) 不要意外加入 hidden 评测集
+**/data/hidden/
+
+*~
