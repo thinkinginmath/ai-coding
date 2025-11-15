@@ -6,10 +6,7 @@ This repository contains several **independent coding challenges** designed for 
 These challenges are organized by directory.
 Each folder contains its own problem statement (`README.md`) and supporting files.
 
-> **Note:** This top-level README is *not* part of what students receive during the test.
-> Individual challenge folders include their own instructions.
 
----
 
 ## 📂 Challenge List
 
