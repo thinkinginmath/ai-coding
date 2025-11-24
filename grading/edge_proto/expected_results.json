@@ -1,0 +1,20 @@
+{
+  "edge_proto_v1_A.log": {
+    "total_requests": 2468,
+    "error_rate": 0.09,
+    "avg_rtt_ms": 27.1,
+    "top_congestion": "bbr"
+  },
+  "edge_proto_v1_B.log": {
+    "total_requests": 2468,
+    "error_rate": 0.39,
+    "avg_rtt_ms": 51.7,
+    "top_congestion": "cubic"
+  },
+  "edge_proto_v1_1_C.log": {
+    "total_requests": 2467,
+    "error_rate": 0.39,
+    "avg_rtt_ms": 52.2,
+    "top_congestion": "bbr"
+  }
+}

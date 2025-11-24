@@ -17,11 +17,126 @@
 - 能解析 Edge-Proto v1.0 / v1.1 日志；
 - 能输出一组关键统计指标（JSON 格式）；
 - 在面对“协议演进 + 脏数据”时保持 **前向可扩展** 与 **后向兼容**；
-- 展示你如何使用 AI 助手（ChatGPT / Copilot 等）来完成“ Few-Shot 扩展”。
+- 展示你如何使用 AI 助手（ChatGPT / Copilot 等）来完成" Few-Shot 扩展"。
 
 ---
 
-## 二、数据集说明
+## 二、程序接口规范（必读！）
+
+**为确保自动评测的一致性，所有提交必须遵循以下接口规范：**
+
+### 命令行接口
+
+**Python 实现：**
+```bash
+python -m edge_proto_tool.main <输入文件路径>
+```
+
+**Go 实现：**
+```bash
+./edge_proto_tool <输入文件路径>
+```
+
+或者使用 `--output` 参数指定输出文件：
+
+```bash
+python -m edge_proto_tool.main <输入文件路径> --output <输出文件路径>
+```
+
+### 输出格式要求
+
+程序必须输出 JSON 格式的统计结果，包含以下**精确字段**：
+
+```json
+{
+  "total_requests": 2468,
+  "error_rate": 0.09,
+  "avg_rtt_ms": 27.1,
+  "top_congestion": "bbr"
+}
+```
+
+**字段说明：**
+
+| 字段名 | 类型 | 说明 | 格式要求 |
+|--------|------|------|----------|
+| `total_requests` | 整数 | 有效请求总数（不含坏行） | 精确值 |
+| `error_rate` | 浮点数 | 4xx/5xx 错误比例 | 0.0-1.0，保留 2 位小数 |
+| `avg_rtt_ms` | 浮点数 | 平均往返时延（毫秒） | 保留 1 位小数 |
+| `top_congestion` | 字符串 | 出现次数最多的拥塞算法 | 如 "bbr", "cubic" |
+
+**输出方式：**
+
+- **方式 A**（默认）：输出到 stdout
+  ```bash
+  python -m edge_proto_tool.main data/sample/edge_proto_v1_A.log
+  # 直接在终端打印 JSON
+  ```
+
+- **方式 B**：输出到文件
+  ```bash
+  python -m edge_proto_tool.main data/sample/edge_proto_v1_A.log --output results/A_stats.json
+  # JSON 写入指定文件
+  ```
+
+### 错误处理要求
+
+1. **坏行处理**：遇到格式错误的行时，程序**不得中断**
+2. **警告输出**：对于无效行，应向 stderr 输出警告信息（包含行号和原因）
+3. **跳过无效行**：坏行不计入统计，但需要在 stderr 中报告
+
+**示例 stderr 输出：**
+```
+Warning line 163: insufficient fields: expected 10-11, got 7
+Warning line 290: insufficient fields: expected 10-11, got 9
+```
+
+### 目录结构建议
+
+为了便于评测脚本自动检测，建议采用以下目录结构：
+
+**Python：**
+```
+your-submission/
+  edge_proto_tool/
+    __init__.py
+    main.py
+    parser.py
+  requirements.txt
+  README.md
+```
+
+**Go：**
+```
+your-submission/
+  edge_proto_tool     # 编译后的二进制文件
+  main.go
+  parser.go
+  go.mod
+  README.md
+```
+
+### 测试你的程序
+
+在提交前，请确保你的程序能在 sample 数据集上正常运行：
+
+```bash
+# Python
+python -m edge_proto_tool.main data/sample/edge_proto_v1_A.log
+python -m edge_proto_tool.main data/sample/edge_proto_v1_B.log
+python -m edge_proto_tool.main data/sample/edge_proto_v1_1_C.log
+
+# Go
+./edge_proto_tool data/sample/edge_proto_v1_A.log
+./edge_proto_tool data/sample/edge_proto_v1_B.log
+./edge_proto_tool data/sample/edge_proto_v1_1_C.log
+```
+
+**重要提示：** 自动评测将使用隐藏数据集测试你的程序，该数据集与 sample 数据格式相同，但内容不同。
+
+---
+
+## 三、数据集说明
 
 本仓库包含一个公开样例数据集，用于本地开发与调试：
 
@@ -75,7 +190,7 @@ data/sample/
 
 ---
 
-## 三、你的任务
+## 四、你的任务
 
 你可以使用 **Python 或 Go** 实现，语言自选。建议目录结构如下（也可以自行组织）：
 
@@ -167,7 +282,7 @@ data/
 
 ---
 
-## 四、输出与提交要求
+## 五、输出与提交要求
 
 ### 1. 程序输出
 
@@ -216,7 +331,7 @@ data/
 
 ---
 
-## 五、评分参考（仅供考生参考，不含具体权重）
+## 六、评分参考（仅供考生参考，不含具体权重）
 
 1. **功能正确性**：统计结果是否正确（基于隐藏数据集比对 JSON）；
 2. **稳健性与扩展性**：坏行处理、未知字段处理、对 v1.1 的兼容能力，代码结构是否有利于未来扩展；
@@ -225,7 +340,7 @@ data/
 
 ---
 
-## 六、快速开始（建议）
+## 七、快速开始（建议）
 
 如果使用 Python，可以参考：
 
