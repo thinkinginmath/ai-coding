@@ -1,0 +1,23 @@
+# Exclude node_modules
+node_modules/
+.npm/
+
+# Exclude git
+.git/
+
+# Exclude IDE settings
+.idea/
+.vscode/
+
+# Exclude build artifacts
+build/
+dist/
+
+# Exclude temp files
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Exclude submissions
+submissions/

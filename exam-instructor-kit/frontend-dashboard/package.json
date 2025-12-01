@@ -1,0 +1,23 @@
+{
+  "name": "frontend-dashboard-grader",
+  "version": "1.0.0",
+  "description": "Auto-grader for frontend-live-latency-dashboard challenge",
+  "main": "mock-api-server.js",
+  "scripts": {
+    "api": "node mock-api-server.js",
+    "api:test": "node mock-api-server.js --mode=test",
+    "test": "playwright test",
+    "test:debug": "playwright test --debug",
+    "test:report": "playwright show-report",
+    "install-browsers": "playwright install"
+  },
+  "keywords": ["grading", "testing", "playwright"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@playwright/test": "^1.40.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

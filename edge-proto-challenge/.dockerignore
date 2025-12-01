@@ -1,0 +1,22 @@
+# Exclude hidden/grading data from student Docker image
+data/hidden/
+*.pyc
+__pycache__/
+.git/
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Exclude any submission directories
+submissions/
+results/
+
+# Exclude IDE settings
+.idea/
+.vscode/

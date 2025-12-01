@@ -1,0 +1,17 @@
+# Edge-Proto v1.1 - Dataset D: Robustness Testing (All Bad Lines)
+# This dataset contains 14 lines, each with exactly one type of error.
+# A correctly implemented parser should reject ALL lines and return total_requests = 0
+2025-03T10:10:00Z,4146,GET,/assets/app.js,301,1484,4441,44,bbr,q050,HIT
+2025-03-01T10:10:00Z,str,GET,/assets/app.js,301,1484,4441,44,bbr,q050,HIT
+2025-03-01T10:10:00Z,4146,TRUE,/assets/app.js,301,1484,4441,44,bbr,q050,HIT
+2025-03-01T10:10:00Z,4146,GET,,301,1484,4441,44,bbr,q050,HIT
+2025-03-01T10:10:00Z,4146,GET,/assets/app.js,999,1484,4441,44,bbr,q050,HIT
+2025-03-01T10:10:00Z,4146,GET,/assets/app.js,301,app,4441,44,bbr,q050,HIT
+2025-03-01T10:10:00Z,4146,GET,/assets/app.js,301,1484,api,44,bbr,q050,HIT
+2025-03-01T10:10:00Z,4146,GET,/assets/app.js,301,1484,4441,second,bbr,q050,HIT
+2025-03-01T10:10:00Z,4146,GET,/assets/app.js,301,1484,4441,44,bbrbbr,q050,HIT
+2025-03-01T10:10:00Z,4146,GET,/assets/app.js,301,1484,4441,44,bbr,xq050,HIT
+2025-03-01T10:10:00Z,4146,GET,/assets/app.js,301,1484,4441,44,bbr,q050,HITT
+2025-03-01T10:10:00Z,4146,GET,/assets/app.js,301,1484,
+2025-03-01T10:10:00Z,4146,GET,/assets/app.js,301,1484,4441,44,bbr,q050,HIT,UNKNOWN
+# 2025-03-01T10:10:00Z,4146,GET,/assets/app.js,301,1484,4441,44,bbr,q050,HIT

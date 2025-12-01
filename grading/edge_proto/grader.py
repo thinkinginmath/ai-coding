@@ -5,6 +5,15 @@ Auto-grader for edge-proto-challenge.
 This script runs a candidate's submission against hidden test data and
 compares the output against expected results.
 
+Scoring:
+- Dataset A (v1.0 normal): 20 points
+- Dataset B (v1.0 with errors): 30 points
+- Dataset C (v1.1 extended): 36 points
+- Dataset D (all bad lines): 14 points
+
+Total: 100 points
+Pass threshold: 60 points
+
 Usage:
     python grader.py <submission_dir>
 
@@ -164,8 +173,10 @@ def compare_results(
     else:
         field_results['avg_rtt_ms'] = False
 
-    # Check top_congestion (exact match)
-    if actual.get('top_congestion') == expected.get('top_congestion'):
+    # Check top_congestion (exact match, or both empty)
+    actual_tc = actual.get('top_congestion', '')
+    expected_tc = expected.get('top_congestion', '')
+    if actual_tc == expected_tc:
         field_results['top_congestion'] = True
         correct_fields += 1
     else:
@@ -175,6 +186,29 @@ def compare_results(
     return score_percentage, field_results
 
 
+def grade_dataset_d(actual: Dict, expected: Dict) -> Tuple[float, int]:
+    """
+    Special grading for Dataset D (all bad lines).
+
+    Dataset D contains 14 bad lines. A correct implementation should
+    return total_requests = 0.
+
+    Each incorrectly counted line (total_requests > 0) results in 1 point deduction.
+
+    Returns:
+        (score, total_requests_value)
+    """
+    max_points = 14
+    actual_total = actual.get('total_requests', 0)
+
+    if actual_total == 0:
+        return max_points, actual_total
+    elif actual_total >= 14:
+        return 0, actual_total
+    else:
+        return max_points - actual_total, actual_total
+
+
 def print_test_result(
     dataset_name: str,
     success: bool,
@@ -182,7 +216,10 @@ def print_test_result(
     actual: Optional[Dict],
     expected: Dict,
     field_results: Optional[Dict[str, bool]],
-    stderr: str
+    stderr: str,
+    points: float,
+    max_points: float,
+    is_dataset_d: bool = False
 ):
     """Print a formatted test result."""
 
@@ -192,26 +229,36 @@ def print_test_result(
         print(f"  {Colors.RED}✗ FAILED - Program did not execute successfully{Colors.RESET}")
         if stderr:
             print(f"  Error output: {stderr[:200]}")
+        print(f"  Points earned: 0 / {max_points}")
         return
 
-    print(f"  Score: {score:.1f}%")
+    if is_dataset_d:
+        # Special output for Dataset D
+        actual_total = actual.get('total_requests', 0) if actual else -1
+        if actual_total == 0:
+            print(f"  {Colors.GREEN}✓ All bad lines correctly rejected{Colors.RESET}")
+        else:
+            print(f"  {Colors.RED}✗ total_requests = {actual_total} (should be 0){Colors.RESET}")
+        print(f"  Points earned: {points:.1f} / {max_points}")
+    else:
+        print(f"  Score: {score:.1f}%")
 
-    # Print field-by-field comparison
-    fields = ['total_requests', 'error_rate', 'avg_rtt_ms', 'top_congestion']
-    for field in fields:
-        is_correct = field_results.get(field, False)
-        status = f"{Colors.GREEN}✓{Colors.RESET}" if is_correct else f"{Colors.RED}✗{Colors.RESET}"
+        # Print field-by-field comparison
+        fields = ['total_requests', 'error_rate', 'avg_rtt_ms', 'top_congestion']
+        for field in fields:
+            is_correct = field_results.get(field, False)
+            status = f"{Colors.GREEN}✓{Colors.RESET}" if is_correct else f"{Colors.RED}✗{Colors.RESET}"
 
-        actual_val = actual.get(field, 'N/A')
-        expected_val = expected.get(field, 'N/A')
+            actual_val = actual.get(field, 'N/A')
+            expected_val = expected.get(field, 'N/A')
 
-        print(f"  {status} {field:20s} actual={actual_val:<15} expected={expected_val}")
+            print(f"  {status} {field:20s} actual={actual_val:<15} expected={expected_val}")
+
+        print(f"  Points earned: {points:.1f} / {max_points}")
 
     # Check if warnings were produced for bad lines
     if stderr and 'warning' in stderr.lower():
         print(f"  {Colors.GREEN}✓{Colors.RESET} Program produced warnings for bad lines")
-    else:
-        print(f"  {Colors.YELLOW}⚠{Colors.RESET} No warnings detected (may not be handling bad lines)")
 
 
 def main():
@@ -230,6 +277,7 @@ def main():
     print(f"{Colors.BOLD}Edge-Proto Challenge Auto-Grader{Colors.RESET}")
     print(f"Submission: {submission_dir.name}")
     print("=" * 70)
+    print(f"\nScoring: A=20, B=30, C=36, D=14 (Total: 100, Pass: 60)")
 
     # Load expected results
     script_dir = Path(__file__).parent
@@ -263,18 +311,24 @@ def main():
         print(f"Error: Hidden test data not found: {hidden_data_dir}")
         sys.exit(1)
 
-    # Run tests
+    # Run tests - updated scoring
     datasets = [
-        ('edge_proto_v1_A.log', 20),     # v1.0 normal traffic
-        ('edge_proto_v1_B.log', 25),     # v1.0 with errors
-        ('edge_proto_v1_1_C.log', 25),   # v1.1 extended
+        ('edge_proto_v1_A.log', 20, False),      # v1.0 normal traffic
+        ('edge_proto_v1_B.log', 30, False),      # v1.0 with errors
+        ('edge_proto_v1_1_C.log', 36, False),    # v1.1 extended
+        ('edge_proto_v1_1_D.log', 14, True),     # all bad lines (robustness)
     ]
 
     total_score = 0
-    max_score = 70  # Total correctness score
+    max_score = 100
 
-    for dataset_name, points in datasets:
+    for dataset_name, max_points, is_dataset_d in datasets:
         input_file = hidden_data_dir / dataset_name
+
+        if dataset_name not in expected_results:
+            print(f"\n{Colors.YELLOW}⚠ Skipping {dataset_name}: no expected results{Colors.RESET}")
+            continue
+
         expected = expected_results[dataset_name]
 
         # Run the program
@@ -285,24 +339,38 @@ def main():
         )
 
         if result is None:
-            print_test_result(dataset_name, False, 0, None, expected, None, stderr)
+            print_test_result(
+                dataset_name, False, 0, None, expected, None, stderr,
+                0, max_points, is_dataset_d
+            )
             continue
 
-        # Compare results
-        score_pct, field_results = compare_results(result, expected)
-        dataset_score = (score_pct / 100) * points
-        total_score += dataset_score
-
-        print_test_result(dataset_name, True, score_pct, result, expected, field_results, stderr)
-        print(f"  Points earned: {dataset_score:.1f} / {points}")
+        if is_dataset_d:
+            # Special grading for Dataset D
+            points, actual_total = grade_dataset_d(result, expected)
+            total_score += points
+            print_test_result(
+                dataset_name, True, 0, result, expected, None, stderr,
+                points, max_points, True
+            )
+        else:
+            # Normal grading for A/B/C
+            score_pct, field_results = compare_results(result, expected)
+            dataset_score = (score_pct / 100) * max_points
+            total_score += dataset_score
+            print_test_result(
+                dataset_name, True, score_pct, result, expected, field_results, stderr,
+                dataset_score, max_points, False
+            )
 
     # Summary
     print("\n" + "=" * 70)
-    print(f"{Colors.BOLD}FINAL SCORE (Correctness): {total_score:.1f} / {max_score}{Colors.RESET}")
-    print("\nNote: This score only covers correctness (70% of total grade).")
-    print("Additional points for:")
-    print("  - Robustness & extensibility: 15 points (manual review)")
-    print("  - Code quality & documentation: 15 points (manual review)")
+    passed = total_score >= 60
+    status_color = Colors.GREEN if passed else Colors.RED
+    status_text = "PASSED" if passed else "FAILED"
+
+    print(f"{Colors.BOLD}FINAL SCORE: {total_score:.1f} / {max_score} ({status_color}{status_text}{Colors.RESET}){Colors.RESET}")
+    print(f"\nPass threshold: 60 points")
 
 
 if __name__ == '__main__':

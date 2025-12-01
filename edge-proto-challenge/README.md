@@ -1,4 +1,4 @@
-# 题目 C：HTTP/3／CDN 协议分析工具（含 Few-Shot 扩展）
+# 题目 C：HTTP/3／CDN 协议日志分析工具（含 Few-Shot 扩展）
 
 ## 一、任务背景
 
@@ -6,22 +6,105 @@
 
 为便于跨团队调试与快速定位问题，公司定义了简化版 **Edge-Proto v1.x** 日志格式，用于记录边缘节点与源站交互摘要（请求方法、路径、状态码、收发字节、往返时延 RTT、拥塞算法、QUIC 版本等）。
 
-日志有以下特点：
+> **本质上，这是一个日志分析工具**，用于解析兼容 HTTP/3／CDN 协议的日志文件并生成统计报告。
 
-- 来自边缘节点的 HTTP/3 / QUIC 交互；
-- 协议会演进（v1.0 → v1.1 …），字段可能新增；
-- 数据质量不完美：存在坏行、未知字段、字段缺失。
-
-你的任务是实现一个 **HTTP/3 / CDN 协议分析工具**：
+你的任务是实现一个 **HTTP/3 / CDN 协议日志分析工具**：
 
 - 能解析 Edge-Proto v1.0 / v1.1 日志；
 - 能输出一组关键统计指标（JSON 格式）；
-- 在面对“协议演进 + 脏数据”时保持 **前向可扩展** 与 **后向兼容**；
-- 展示你如何使用 AI 助手（ChatGPT / Copilot 等）来完成" Few-Shot 扩展"。
+- 在面对"协议演进 + 脏数据"时保持 **前向可扩展** 与 **后向兼容**；
+- 展示你如何使用 AI 助手（ChatGPT / Copilot 等）来完成"Few-Shot 扩展"。
 
 ---
 
-## 二、程序接口规范（必读！）
+## 二、字段定义规范（重要！）
+
+### Edge-Proto v1.0 字段定义（按顺序，共 10 个字段）
+
+| 位置 | 字段名 | 类型 | 说明 | 有效值示例 |
+|------|--------|------|------|------------|
+| 1 | `timestamp` | 字符串 | ISO8601 时间戳 | `2025-03-01T10:00:00Z`（必须以 Z 结尾） |
+| 2 | `stream_id` | 整数 | QUIC 流 ID | `167`, `3061` |
+| 3 | `method` | 字符串 | HTTP 方法 | `GET`, `POST`, `PUT`, `DELETE`, `PATCH`, `HEAD`, `OPTIONS` |
+| 4 | `path` | 字符串 | URL 路径 | `/index.html`, `/api/user`（不能为空） |
+| 5 | `status` | 整数 | HTTP 状态码 | `100-599` 范围内的整数 |
+| 6 | `bytes_sent` | 整数 | 发送字节数 | `1259`, `8867` |
+| 7 | `bytes_recv` | 整数 | 接收字节数 | `3623`, `54957` |
+| 8 | `rtt_ms` | 整数 | 往返时延（毫秒） | `32`, `44` |
+| 9 | `congestion` | 字符串 | 拥塞控制算法 | `bbr`, `cubic` |
+| 10 | `quic_version` | 字符串 | QUIC 版本 | `q043`, `q046`, `q050`（必须以 q 开头） |
+
+### Edge-Proto v1.1 字段定义（共 11 个字段）
+
+在 v1.0 的基础上，末尾新增一个字段：
+
+| 位置 | 字段名 | 类型 | 说明 | 有效值示例 |
+|------|--------|------|------|------------|
+| 11 | `edge_cache_status` | 字符串 | 边缘缓存状态 | `HIT`, `MISS`, `BYPASS` |
+
+---
+
+## 三、坏行定义与示例（重要！）
+
+以下情况视为**坏行**，应跳过并输出警告，不计入统计：
+
+### 1. 字段数量错误
+
+```text
+# 字段不足（只有 6 个字段）
+2025-03-01T10:10:00Z,4146,GET,/assets/app.js,301,1484,
+
+# 字段过多（12 个字段）
+2025-03-01T10:10:00Z,4146,GET,/assets/app.js,301,1484,4441,44,bbr,q050,HIT,UNKNOWN
+```
+
+### 2. 字段格式/类型错误
+
+```text
+# timestamp 格式错误（缺少日期部分）
+2025-03T10:10:00Z,4146,GET,/assets/app.js,301,1484,4441,44,bbr,q050,HIT
+
+# stream_id 不是数字
+2025-03-01T10:10:00Z,str,GET,/assets/app.js,301,1484,4441,44,bbr,q050,HIT
+
+# method 不是有效的 HTTP 方法
+2025-03-01T10:10:00Z,4146,TRUE,/assets/app.js,301,1484,4441,44,bbr,q050,HIT
+
+# path 为空
+2025-03-01T10:10:00Z,4146,GET,,301,1484,4441,44,bbr,q050,HIT
+
+# status 超出有效范围（>599）
+2025-03-01T10:10:00Z,4146,GET,/assets/app.js,999,1484,4441,44,bbr,q050,HIT
+
+# bytes_sent 不是数字
+2025-03-01T10:10:00Z,4146,GET,/assets/app.js,301,app,4441,44,bbr,q050,HIT
+
+# bytes_recv 不是数字
+2025-03-01T10:10:00Z,4146,GET,/assets/app.js,301,1484,api,44,bbr,q050,HIT
+
+# rtt_ms 不是数字
+2025-03-01T10:10:00Z,4146,GET,/assets/app.js,301,1484,4441,second,bbr,q050,HIT
+
+# congestion 不是有效值
+2025-03-01T10:10:00Z,4146,GET,/assets/app.js,301,1484,4441,44,bbrbbr,q050,HIT
+
+# quic_version 格式错误（不以 q 开头）
+2025-03-01T10:10:00Z,4146,GET,/assets/app.js,301,1484,4441,44,bbr,xq050,HIT
+
+# edge_cache_status 不是有效值
+2025-03-01T10:10:00Z,4146,GET,/assets/app.js,301,1484,4441,44,bbr,q050,HITT
+```
+
+### 3. 注释行
+
+```text
+# 以 # 开头的行是注释，应忽略（不计入坏行，也不计入有效行）
+# 2025-03-01T10:10:00Z,4146,GET,/assets/app.js,301,1484,4441,44,bbr,q050,HIT
+```
+
+---
+
+## 四、程序接口规范（必读！）
 
 **为确保自动评测的一致性，所有提交必须遵循以下接口规范：**
 
@@ -37,21 +120,15 @@ python -m edge_proto_tool.main <输入文件路径>
 ./edge_proto_tool <输入文件路径>
 ```
 
-或者使用 `--output` 参数指定输出文件：
-
-```bash
-python -m edge_proto_tool.main <输入文件路径> --output <输出文件路径>
-```
-
 ### 输出格式要求
 
 程序必须输出 JSON 格式的统计结果，包含以下**精确字段**：
 
 ```json
 {
-  "total_requests": 2468,
-  "error_rate": 0.09,
-  "avg_rtt_ms": 27.1,
+  "total_requests": 498,
+  "error_rate": 0.12,
+  "avg_rtt_ms": 26.8,
   "top_congestion": "bbr"
 }
 ```
@@ -61,23 +138,18 @@ python -m edge_proto_tool.main <输入文件路径> --output <输出文件路径
 | 字段名 | 类型 | 说明 | 格式要求 |
 |--------|------|------|----------|
 | `total_requests` | 整数 | 有效请求总数（不含坏行） | 精确值 |
-| `error_rate` | 浮点数 | 4xx/5xx 错误比例 | 0.0-1.0，保留 2 位小数 |
-| `avg_rtt_ms` | 浮点数 | 平均往返时延（毫秒） | 保留 1 位小数 |
-| `top_congestion` | 字符串 | 出现次数最多的拥塞算法 | 如 "bbr", "cubic" |
+| `error_rate` | 浮点数 | 4xx/5xx 错误比例 | 0.0-1.0，**保留 2 位小数** |
+| `avg_rtt_ms` | 浮点数 | 平均往返时延（毫秒） | **保留 1 位小数** |
+| `top_congestion` | 字符串 | 出现次数最多的拥塞算法 | `"bbr"` 或 `"cubic"` |
 
-**输出方式：**
+### 浮点数格式说明
 
-- **方式 A**（默认）：输出到 stdout
-  ```bash
-  python -m edge_proto_tool.main data/sample/edge_proto_v1_A.log
-  # 直接在终端打印 JSON
-  ```
+- `error_rate`: 保留 2 位小数。例如：`0.10`（不是 `0.1`），`0.05`
+- `avg_rtt_ms`: 保留 1 位小数。例如：`27.0`（不是 `27`），`53.8`
 
-- **方式 B**：输出到文件
-  ```bash
-  python -m edge_proto_tool.main data/sample/edge_proto_v1_A.log --output results/A_stats.json
-  # JSON 写入指定文件
-  ```
+**注意：** 评分时会使用容差比较：
+- `error_rate`: ±0.01 容差
+- `avg_rtt_ms`: ±0.5 容差
 
 ### 错误处理要求
 
@@ -88,12 +160,131 @@ python -m edge_proto_tool.main <输入文件路径> --output <输出文件路径
 **示例 stderr 输出：**
 ```
 Warning line 163: insufficient fields: expected 10-11, got 7
-Warning line 290: insufficient fields: expected 10-11, got 9
+Warning line 290: invalid stream_id: not a number
 ```
 
-### 目录结构建议
+---
 
-为了便于评测脚本自动检测，建议采用以下目录结构：
+## 五、数据集说明
+
+### 考试用数据集（sample）
+
+```text
+data/sample/
+  ├── edge_proto_v1_A.log       # 数据集 A：v1.0 常规 HTTP/3 流量
+  ├── edge_proto_v1_B.log       # 数据集 B：v1.0 含错误状态、多拥塞算法、坏行
+  ├── edge_proto_v1_1_C.log     # 数据集 C：v1.1 扩展，新增缓存状态字段
+  ├── edge_proto_v1_1_D.log     # 数据集 D：全坏行（用于测试鲁棒性）
+  ├── expected_answers.json     # 参考答案
+  └── MANIFEST.json             # 简要说明
+```
+
+### 参考答案
+
+以下是 sample 数据集的**标准答案**，供考生验证程序正确性：
+
+**edge_proto_v1_A.log (v1.0 常规流量):**
+```json
+{
+  "total_requests": 498,
+  "error_rate": 0.12,
+  "avg_rtt_ms": 26.8,
+  "top_congestion": "bbr"
+}
+```
+
+**edge_proto_v1_B.log (v1.0 含错误):**
+```json
+{
+  "total_requests": 492,
+  "error_rate": 0.42,
+  "avg_rtt_ms": 53.8,
+  "top_congestion": "cubic"
+}
+```
+
+**edge_proto_v1_1_C.log (v1.1 扩展):**
+```json
+{
+  "total_requests": 498,
+  "error_rate": 0.43,
+  "avg_rtt_ms": 53.0,
+  "top_congestion": "bbr"
+}
+```
+
+**edge_proto_v1_1_D.log (全坏行):**
+```json
+{
+  "total_requests": 0,
+  "error_rate": 0.0,
+  "avg_rtt_ms": 0.0,
+  "top_congestion": ""
+}
+```
+
+### 评分用数据集（hidden）
+
+评分时将使用**隐藏数据集**，格式与 sample 完全一致，但内容不同。
+
+---
+
+## 六、评分标准
+
+### 总分：100 分，60 分及以上为通过
+
+| 数据集 | 分值 | 说明 |
+|--------|------|------|
+| Dataset A (v1.0 normal) | 20 分 | 常规 HTTP/3 流量 |
+| Dataset B (v1.0 with errors) | 30 分 | 含错误状态码和坏行 |
+| Dataset C (v1.1 extended) | 36 分 | v1.1 扩展格式 |
+| Dataset D (all bad lines) | 14 分 | 全坏行，测试鲁棒性 |
+
+### 评分方法
+
+#### Dataset A/B/C 评分规则
+
+每个数据集按 4 个输出字段分别计分，每个字段占该数据集分值的 25%：
+
+- `total_requests`: 精确匹配
+- `error_rate`: ±0.01 容差
+- `avg_rtt_ms`: ±0.5 容差
+- `top_congestion`: 精确匹配
+
+#### Dataset D 评分规则（鲁棒性测试）
+
+- Dataset D 包含 14 行，每行包含一种不同类型的错误
+- 只检查 `total_requests` 字段
+- 正确处理所有坏行时，`total_requests` 应为 0
+- 每个未正确识别的坏行扣 1 分（根据 `total_requests` 值扣分）
+
+---
+
+## 七、你的任务
+
+### 任务 1：实现日志解析与统计（Edge-Proto v1.0）
+
+1. 解析 `data/sample/` 下的 v1.0 日志文件（A、B）
+2. 计算并输出统计指标（JSON 格式）
+3. 正确处理坏行（跳过并输出警告）
+
+### 任务 2：设计可扩展的解析结构
+
+- 将解析逻辑设计为**可扩展 / 插件化**
+- 考虑新增字段时对旧版本的影响
+- 在 README 中说明你的设计思路
+
+### 任务 3：Few-Shot 扩展 —— 支持 Edge-Proto v1.1
+
+1. 使用 AI 助手进行 Few-Shot 推断新增字段
+2. 扩展解析器，使其同时支持 v1.0 和 v1.1
+3. 在 README 中附上 Prompt 和 AI 返回的关键结论
+
+---
+
+## 八、提交要求
+
+### 目录结构
 
 **Python：**
 ```
@@ -118,240 +309,61 @@ your-submission/
 
 ### 测试你的程序
 
-在提交前，请确保你的程序能在 sample 数据集上正常运行：
-
 ```bash
 # Python
 python -m edge_proto_tool.main data/sample/edge_proto_v1_A.log
 python -m edge_proto_tool.main data/sample/edge_proto_v1_B.log
 python -m edge_proto_tool.main data/sample/edge_proto_v1_1_C.log
+python -m edge_proto_tool.main data/sample/edge_proto_v1_1_D.log
 
 # Go
 ./edge_proto_tool data/sample/edge_proto_v1_A.log
 ./edge_proto_tool data/sample/edge_proto_v1_B.log
 ./edge_proto_tool data/sample/edge_proto_v1_1_C.log
+./edge_proto_tool data/sample/edge_proto_v1_1_D.log
 ```
 
-**重要提示：** 自动评测将使用隐藏数据集测试你的程序，该数据集与 sample 数据格式相同，但内容不同。
-
 ---
 
-## 三、数据集说明
+## 九、Docker 开发环境
 
-本仓库包含一个公开样例数据集，用于本地开发与调试：
+为确保统一的开发环境，我们提供了 Docker 镜像，包含 Python 3.11 和 Go 运行时。
 
-```text
-data/sample/
-  ├── edge_proto_v1_A.log       # 数据集 A：常规 HTTP/3 流量
-  ├── edge_proto_v1_B.log       # 数据集 B：含错误状态、多拥塞算法
-  ├── edge_proto_v1_1_C.log     # 数据集 C：v1.1 扩展，新增缓存状态字段
-  └── MANIFEST.json             # 简要说明
-```
+**程序必须能在 Docker 环境中运行，输出 JSON 格式结果。**
 
-### 1. Edge-Proto v1.0
-
-`edge_proto_v1_A.log` 和 `edge_proto_v1_B.log` 中的日志行为 **v1.0**，每行示例：
-
-```text
-2025-03-01T10:01:02Z,33,GET,/index.html,200,1520,56321,21,bbr,q050
-```
-
-字段大致包含：
-
-* `timestamp`：时间戳（ISO8601，Z 结尾）
-* `stream_id`：QUIC 流 ID
-* `method`：HTTP 方法（GET/POST/…）
-* `path`：URL 路径
-* `status`：HTTP 状态码
-* `bytes_sent`：发送字节数
-* `bytes_recv`：接收字节数
-* `rtt_ms`：往返时延（毫秒）
-* `congestion`：拥塞控制算法（如 `bbr` / `cubic`）
-* `quic_version`：QUIC 版本（如 `q046` / `q050`）
-
-日志中可能混入：
-
-* 字段数不对的坏行；
-* 附加未知字段的行；
-* 注释行（以 `#` 开头，尤其在 v1.1 样例中）。
-
-### 2. Edge-Proto v1.1（扩展示例）
-
-`edge_proto_v1_1_C.log` 中为 **v1.1**，示例：
-
-```text
-# Edge-Proto v1.1
-2025-03-01T10:01:02Z,33,GET,/index.html,200,1520,56321,21,bbr,q050,HIT
-2025-03-01T10:01:03Z,35,GET,/api/user,503,980,312,14,bbr,q046,MISS
-2025-03-01T10:01:04Z,37,POST,/upload,200,3210,12893,42,cubic,q050,BYPASS
-```
-
-与 v1.0 相比，多了一个末尾字段（你需要自行归纳其字段名与含义，例如 `edge_cache_status`）。
-
----
-
-## 四、你的任务
-
-你可以使用 **Python 或 Go** 实现，语言自选。建议目录结构如下（也可以自行组织）：
-
-```text
-src/
-  edge_proto_tool/
-    main.py           # 或 main.go
-    parser.py         # 或 parser.go
-    ...
-data/
-  sample/
-    ...
-```
-
-### 任务 1：实现日志解析与统计（Edge-Proto v1.0）
-
-编写程序，完成以下功能：
-
-1. 解析 `data/sample/` 下的 v1.0 日志文件（A、B）；
-
-2. 计算并输出以下统计指标（JSON，对不同文件分别输出即可）：
-
-   ```json
-   {
-     "total_requests": 3000,
-     "error_rate": 0.04,
-     "avg_rtt_ms": 27.8,
-     "top_congestion": "bbr"
-   }
-   ```
-
-   其中：
-
-   * `total_requests`：有效请求总数（坏行不计入）
-   * `error_rate`：错误请求比例（例如 4xx/5xx 所占比例），0–1 浮点数
-   * `avg_rtt_ms`：有效请求的平均 RTT（毫秒，建议保留 1 位小数或 2 位小数）
-   * `top_congestion`：出现次数最多的拥塞算法名称
-
-3. 遇到非法行或未知格式时：
-
-   * 不得中断程序；
-   * 在标准输出或日志中打印一条 **警告**（例如包含行号与原因）；
-   * 跳过该行，不计入统计。
-
-> 注意：请自行归纳字段含义和位置，不依赖题面给出的精确字段表。
-
----
-
-### 任务 2：设计可扩展的解析结构
-
-为了适应未来版本（例如 v1.2、v2.0）：
-
-* 请将解析逻辑设计为 **可扩展 / 插件化**：
-
-  * 可以通过类/接口/策略模式等方式拆分；
-  * 避免将所有字段写死在一处的“巨大 if/else”；
-* 考虑：
-
-  * 新增字段时对旧版本的影响；
-  * 未知字段如何处理；
-  * 能否根据行的字段数量或头部注释自动识别版本。
-
-你需要在 `README` 中简单说明你的设计思路。
-
----
-
-### 任务 3：Few-Shot 扩展 —— 支持 Edge-Proto v1.1
-
-使用 `edge_proto_v1_1_C.log`（包含 v1.1 日志），完成：
-
-1. **使用 AI 助手（如 ChatGPT / Copilot）进行 Few-Shot 推断**：
-
-   * 利用题目给出的 v1.1 示例行；
-   * 让 AI 帮你推断新增字段的含义、位置、可能取值；
-   * 设计或改造你的解析器，使其能同时支持 v1.0 和 v1.1。
-
-2. 扩展解析器，使其满足：
-
-   * 能正确解析 v1.0 & v1.1；
-   * v1.1 行中，能解析出新增字段（例如 `edge_cache_status`）；
-   * 代码在面对未来继续增加字段时，尽量无需大改；
-   * 遇到未知字段时保持稳健（警告 + 跳过或忽略）。
-
-3. 在你的 `README` 中附上：
-
-   * 你给 AI 助手的 **提示词（Prompt）**；
-   * AI 返回的**关键结论**（可以是总结/提炼后的版本）；
-   * 你是如何基于这些结论修改解析器的（用几句话说明即可）。
-
----
-
-## 五、输出与提交要求
-
-### 1. 程序输出
-
-你可以选择：
-
-* 方式 A：命令行工具
-
-  * 示例：
-
-    ```bash
-    # 分别对三个文件做统计
-    python -m edge_proto_tool.main data/sample/edge_proto_v1_A.log
-    python -m edge_proto_tool.main data/sample/edge_proto_v1_B.log
-    python -m edge_proto_tool.main data/sample/edge_proto_v1_1_C.log
-    ```
-  * 将 JSON 结果输出到 stdout。
-
-* 方式 B：生成 JSON 文件
-
-  * 例如：
-
-    ```bash
-    python -m edge_proto_tool.main \
-      --input data/sample/edge_proto_v1_A.log \
-      --output out/A_stats.json
-    ```
-
-评测时会用隐藏数据集调用你的程序，并对 JSON 进行比对，请在自述文件中清楚写明：
-
-* 如何运行你的程序；
-* 对某个输入文件，输出写到哪里、格式是什么。
-
-### 2. 提交内容
-
-请确保你的提交包括：
-
-1. 源代码（Python/Go 任意，其它语言请先确认是否支持）；
-2. 自述文件（README）：
-
-   * 项目结构；
-   * 字段解析与版本识别设计；
-   * 使用 AI 助手的 Prompt 与简要说明；
-   * 编译 / 运行 / 简单测试说明；
-3. （可选）简单测试脚本或示例命令；
-4. （可选加分）简单性能测试或错误场景说明。
-
----
-
-## 六、评分参考（仅供考生参考，不含具体权重）
-
-1. **功能正确性**：统计结果是否正确（基于隐藏数据集比对 JSON）；
-2. **稳健性与扩展性**：坏行处理、未知字段处理、对 v1.1 的兼容能力，代码结构是否有利于未来扩展；
-3. **AI 使用说明**：是否合理使用 Few-Shot 思路，Prompt 是否清晰，是否有解释“如何使用/修改 AI 输出”；
-4. **工程规范**：目录结构、注释、可复现性（是否容易一键运行）。
-
----
-
-## 七、快速开始（建议）
-
-如果使用 Python，可以参考：
+### 使用 Docker Compose（推荐）
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate      # Windows 使用 .venv\Scripts\activate
-pip install -r requirements.txt
+# 构建并启动开发环境
+docker-compose up -d
 
+# 进入容器
+docker exec -it edge-proto-challenge bash
+
+# 在容器内运行你的程序
 python -m edge_proto_tool.main data/sample/edge_proto_v1_A.log
 ```
 
-祝你玩得开心，写出既健壮又优雅的解析工具 🙂
+### 使用 Docker 命令
 
+```bash
+# 构建镜像
+docker build -t edge-proto-challenge .
 
+# 运行容器
+docker run -it --rm \
+  -v $(pwd)/submission:/workspace/edge_proto_tool \
+  -v $(pwd)/results:/workspace/results \
+  edge-proto-challenge bash
+```
+
+### 容器内环境
+
+- **Python**: 3.11
+- **Go**: 1.24
+- **工作目录**: `/workspace`
+- **数据目录**: `/workspace/data/sample/`
+
+---
+
+祝你顺利完成挑战！

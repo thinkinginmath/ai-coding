@@ -304,3 +304,53 @@ npm start
 ```
 
 祝你好运！
+
+---
+
+## Docker 开发环境
+
+为确保统一的开发环境，我们提供了 Docker 镜像，包含 Node.js 20 和预配置的 Mock API Server。
+
+### 使用 Docker Compose（推荐）
+
+```bash
+# 构建并启动开发环境
+docker-compose up -d
+
+# 进入容器
+docker exec -it frontend-dashboard-challenge bash
+
+# 在容器内启动 Mock API（终端 1）
+cd /workspace/mock-api && node mock-api-server.js
+
+# 在容器内创建和运行你的 React 应用（终端 2）
+cd /workspace/submission
+npx create-react-app my-dashboard
+cd my-dashboard
+npm start
+```
+
+### 使用 Docker 命令
+
+```bash
+# 构建镜像
+docker build -t frontend-dashboard-challenge .
+
+# 运行容器
+docker run -it --rm \
+  -p 3000:3000 -p 3001:3001 \
+  -v $(pwd)/submission:/workspace/submission \
+  frontend-dashboard-challenge bash
+```
+
+### 容器内环境
+
+- **Node.js**: 20.x
+- **工作目录**: `/workspace`
+- **Mock API**: `/workspace/mock-api/mock-api-server.js`
+- **你的代码**: `/workspace/submission/`
+
+### 端口说明
+
+- **3000**: React 开发服务器
+- **3001**: Mock API Server

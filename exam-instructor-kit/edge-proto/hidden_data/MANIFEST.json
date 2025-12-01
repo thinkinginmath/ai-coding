@@ -1,0 +1,27 @@
+{
+  "root": "/home/ubuntu/src/ai-coding/data/hidden",
+  "seed": 98765,
+  "files": [
+    {
+      "name": "edge_proto_v1_A.log",
+      "dataset": "A",
+      "version": "v1.0",
+      "lines": 2500,
+      "description": "Normal HTTP/3 traffic, mostly 200/206, RTT relatively stable."
+    },
+    {
+      "name": "edge_proto_v1_B.log",
+      "dataset": "B",
+      "version": "v1.0",
+      "lines": 2500,
+      "description": "Includes error status (503/429/etc.) and multiple congestion algorithms with larger RTT jitter."
+    },
+    {
+      "name": "edge_proto_v1_1_C.log",
+      "dataset": "C",
+      "version": "v1.1",
+      "lines": 2500,
+      "description": "Extended protocol v1.1 with edge_cache_status=HIT|MISS|BYPASS."
+    }
+  ]
+}
